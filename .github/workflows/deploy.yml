@@ -1,10 +1,7 @@
 name: Deploy Spring Boot Microservice
 
 on:
-  workflow_run:
-    workflows: ["Build Spring Boot Microservice"]
-    types:
-      - completed
+  workflow_dispatch:   # ejecución manual desde GitHub Actions
 
 jobs:
   deploy:
