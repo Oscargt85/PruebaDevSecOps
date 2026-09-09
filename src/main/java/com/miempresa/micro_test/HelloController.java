@@ -1,4 +1,4 @@
-package com.miempresa.microtest;
+package com.miempresa.micro_test;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;

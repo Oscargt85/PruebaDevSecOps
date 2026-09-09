@@ -1,0 +1,48 @@
+name: Deploy Spring Boot Microservice
+
+on:
+  workflow_run:
+    workflows: ["Build Spring Boot Microservice"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v3
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Inicializar Terraform
+        run: terraform init
+        working-directory: infra/terraform
+
+      - name: Aplicar Terraform
+        run: terraform apply -auto-approve
+        working-directory: infra/terraform
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Configurar kubectl con AKS
+        uses: azure/aks-set-context@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
+
+      - name: Instalar Helm
+        uses: azure/setup-helm@v3
+
+      - name: Desplegar con Helm
+        run: |
+          helm upgrade --install springboot-microservice ./helm/springboot \
+            --set image.repository=${{ secrets.ACR_LOGIN_SERVER }}/springboot-microservice \
+            --set image.tag=${{ github.sha }}
