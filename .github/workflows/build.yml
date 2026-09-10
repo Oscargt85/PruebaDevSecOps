@@ -1,8 +1,8 @@
 name: Build Spring Boot Microservice
 
 on:
-  push:
-    branches: [ "feature/test" ]
+  #push:
+    #branches: [ "feature/test" ]
   pull_request:
     branches: [ "develop" ]
 
