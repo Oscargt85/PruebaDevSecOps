@@ -11,9 +11,9 @@ spec:
     metadata:
       labels:
         app: springboot-microservice
-  spec:
-    containers:
-      - name: springboot-microservice
-        image: ghcr.io/oscargt85/springboot-microservice:v1
-        ports:
-          - containerPort: 8080
+    spec:
+      containers:
+        - name: springboot-microservice
+          image: ghcr.io/oscargt85/springboot-microservice:v1
+          ports:
+            - containerPort: 8080
