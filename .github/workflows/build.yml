@@ -15,8 +15,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # para hacer commit del nuevo tag en k8s/
-      packages: write     # para publicar en GHCR
+      contents: write
+      packages: write
     steps:
       - name: Checkout código
         uses: actions/checkout@v4
@@ -31,6 +31,30 @@ jobs:
       - name: Compilar con Maven
         run: mvn clean package -DskipTests
 
+      - name: Construir imagen (sin publicar)
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.IMAGE_NAME }}:latest .
+
+      - name: Trivy - escanear imagen
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Trivy - escanear Dockerfile y manifiestos
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
       - name: Login en GitHub Container Registry
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -39,15 +63,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Construir y push de imagen Docker
+      - name: Publicar imagen
         if: github.event_name == 'push'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.IMAGE_NAME }}:latest
 
       - name: Actualizar tag de imagen en manifiestos
         if: github.event_name == 'push'
