@@ -22,7 +22,10 @@ spec:
         - name: springboot-microservice
           image: ghcr.io/oscargt85/springboot-microservice:v1
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 8081
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

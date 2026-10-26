@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+  - servicemonitor.yaml
 images:
   - name: ghcr.io/oscargt85/springboot-microservice
     newTag: "2787c4ec9f426c6080bb347bc38ae6dfc818d9ed"
