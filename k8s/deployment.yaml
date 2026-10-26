@@ -1,3 +1,4 @@
+@"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,8 +13,26 @@ spec:
       labels:
         app: springboot-microservice
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: springboot-microservice
           image: ghcr.io/oscargt85/springboot-microservice:v1
           ports:
             - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+"@ | Set-Content -Path k8s\deployment.yaml -Encoding utf8
