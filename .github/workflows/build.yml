@@ -11,6 +11,10 @@ on:
 env:
   IMAGE_NAME: ghcr.io/oscargt85/springboot-microservice
 
+concurrency:
+  group: build-main
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -72,9 +76,17 @@ jobs:
       - name: Actualizar tag de imagen en manifiestos
         if: github.event_name == 'push'
         run: |
-          sed -i "s|newTag:.*|newTag: \"${{ github.sha }}\"|" k8s/kustomization.yaml
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          git add k8s/kustomization.yaml
-          git commit -m "deploy: ${{ github.sha }} [skip ci]" || echo "Sin cambios"
-          git push
+          for i in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            sed -i "s|newTag:.*|newTag: \"${{ github.sha }}\"|" k8s/kustomization.yaml
+            git add k8s/kustomization.yaml
+            git commit -m "deploy: ${{ github.sha }} [skip ci]" || { echo "Sin cambios"; exit 0; }
+            git push origin HEAD:main && exit 0
+            echo "Push rechazado, reintentando ($i/3)..."
+            sleep 3
+          done
+          echo "No se pudo actualizar el tag"
+          exit 1
