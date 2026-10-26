@@ -5,4 +5,4 @@ resources:
   - service.yaml
 images:
   - name: ghcr.io/oscargt85/springboot-microservice
-    newTag: "0efd927712e5b29bbcd8a53fd027f381e459e151"
+    newTag: "2787c4ec9f426c6080bb347bc38ae6dfc818d9ed"
