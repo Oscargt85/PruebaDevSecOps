@@ -1,4 +1,3 @@
-@"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,4 +34,3 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-"@ | Set-Content -Path k8s\deployment.yaml -Encoding utf8
