@@ -6,4 +6,4 @@ resources:
   - servicemonitor.yaml
 images:
   - name: ghcr.io/oscargt85/springboot-microservice
-    newTag: "1da4599f28c5cc387a36552b1c2d0180164b7af1"
+    newTag: "0500b71e7d95c8c4b1428deaae6260e0a0a58e7f"
