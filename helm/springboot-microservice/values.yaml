@@ -1,0 +1,36 @@
+# Valores del chart springboot-microservice.
+# El pipeline de GitHub Actions reemplaza image.tag con el SHA del commit
+# y ArgoCD sincroniza el cambio hacia el clúster.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/oscargt85/springboot-microservice
+  tag: "b52ac4de61e9364ff8aad28dc3aeede33274bb3b"
+  pullPolicy: IfNotPresent
+
+containerPorts:
+  http: 8080
+  metrics: 8081
+
+service:
+  type: ClusterIP
+  port: 80
+  metricsPort: 8081
+
+serviceMonitor:
+  enabled: true
+  path: /actuator/prometheus
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

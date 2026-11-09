@@ -4,10 +4,11 @@ on:
   push:
     branches: [ "main" ]
     paths-ignore:
-      - 'k8s/**'
+      - 'helm/**'
 
 env:
   IMAGE_NAME: ghcr.io/oscargt85/springboot-microservice
+  VALUES_FILE: helm/springboot-microservice/values.yaml
 
 concurrency:
   group: build-main
@@ -69,15 +70,15 @@ jobs:
           docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
           docker push ${{ env.IMAGE_NAME }}:latest
 
-      - name: Actualizar tag de imagen en manifiestos (GitOps)
+      - name: Actualizar image.tag en values.yaml (GitOps)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           for i in 1 2 3; do
             git fetch origin main
             git reset --hard origin/main
-            sed -i "s|newTag:.*|newTag: \"${{ github.sha }}\"|" k8s/kustomization.yaml
-            git add k8s/kustomization.yaml
+            sed -i "s|^  tag:.*|  tag: \"${{ github.sha }}\"|" ${{ env.VALUES_FILE }}
+            git add ${{ env.VALUES_FILE }}
             git commit -m "deploy: ${{ github.sha }} [skip ci]" || { echo "Sin cambios"; exit 0; }
             git push origin HEAD:main && exit 0
             echo "Push rechazado, reintentando ($i/3)..."

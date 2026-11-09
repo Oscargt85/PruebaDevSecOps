@@ -8,7 +8,10 @@ spec:
   source:
     repoURL: https://github.com/Oscargt85/PruebaDevSecOps.git
     targetRevision: main
-    path: k8s
+    path: helm/springboot-microservice
+    helm:
+      valueFiles:
+        - values.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: springboot
