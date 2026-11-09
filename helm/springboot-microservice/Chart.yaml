@@ -1,0 +1,6 @@
+apiVersion: v2
+name: springboot-microservice
+description: Chart de Helm para el microservicio Spring Boot (Deployment, Service y ServiceMonitor)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

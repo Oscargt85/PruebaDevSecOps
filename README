@@ -1,0 +1,234 @@
+bash
+
+cat > /home/claude/spring-boot-microservice/README.md << 'EOF'
+# demo-service — Microservicio Spring Boot 17 con CI/CD a AKS
+
+Proyecto de referencia **funcional**: Spring Boot 3.3 (Java 17) + Docker + GitHub Actions + Terraform (ACR + AKS) + Helm.
+
+---
+
+## 1. Estructura del repositorio
+
+```
+demo-service/
+├── .github/
+│   └── workflows/
+│       ├── build.yml      ← PIPELINE DE BUILD (va aquí, GitHub lo detecta solo)
+│       └── deploy.yml      ← PIPELINE DE DEPLOY (va aquí, GitHub lo detecta solo)
+├── src/main/java/...        (código del microservicio)
+├── src/main/resources/application.yml
+├── pom.xml
+├── Dockerfile
+├── .dockerignore
+├── helm/
+│   └── demo-service/        (chart de Helm)
+├── infra/
+│   └── terraform/
+│       ├── main.tf, variables.tf, outputs.tf, providers.tf, backend.tf
+│       ├── envs/{dev,qa,prod}.tfvars
+│       └── modules/{networking,acr,aks}/
+└── README.md
+```
+
+**Regla clave de GitHub Actions:** cualquier archivo `.yml`/`.yaml` dentro de la carpeta
+`.github/workflows/` en la **raíz del repositorio** es detectado automáticamente por GitHub
+como un workflow. No hay que "activarlo" en ningún lado: basta con hacer `git push` de esa
+carpeta a la rama por defecto (normalmente `main`). Verás los pipelines corriendo en la pestaña
+**Actions** del repositorio.
+
+---
+
+## 2. Configurar el repositorio en GitHub (paso a paso)
+
+### 2.1 Crear el repo y subir el código
+```bash
+git init
+git add .
+git commit -m "Initial commit: demo-service"
+git branch -M main
+git remote add origin https://github.com/<tu-org>/demo-service.git
+git push -u origin main
+```
+En cuanto el push incluya `.github/workflows/build.yml`, GitHub ya lo reconoce.
+
+### 2.2 Habilitar Actions (si está deshabilitado)
+`Settings` → `Actions` → `General` → `Actions permissions` → **Allow all actions and reusable workflows**.
+
+### 2.3 Crear "Environments" (para aprobar despliegues por ambiente)
+`Settings` → `Environments` → `New environment` → crear `dev`, `qa`, `prod`.
+En `prod` puedes activar **Required reviewers** para exigir aprobación manual antes de desplegar.
+
+### 2.4 Variables y Secrets
+`Settings` → `Secrets and variables` → `Actions`.
+
+**Secrets (repository secrets):**
+| Nombre | Valor |
+|---|---|
+| `AZURE_CLIENT_ID` | Client ID de la App Registration / federated identity |
+| `AZURE_TENANT_ID` | Tenant ID de Azure AD |
+| `AZURE_SUBSCRIPTION_ID` | Subscription ID de Azure |
+| `SONAR_TOKEN` | (opcional) token de SonarCloud/SonarQube |
+
+**Variables (repository variables, no sensibles):**
+| Nombre | Ejemplo |
+|---|---|
+| `ACR_LOGIN_SERVER` | `acrdemoservicedev.azurecr.io` |
+| `ACR_NAME` | `acrdemoservicedev` |
+| `SERVICE_NAME` | `demo-service` |
+| `AKS_RESOURCE_GROUP` | `rg-demo-service-dev` |
+| `AKS_CLUSTER_NAME` | `aks-demo-service-dev` |
+| `K8S_NAMESPACE` | `demo` |
+| `TFSTATE_RG` | `rg-tfstate` |
+| `TFSTATE_SA` | `sttfstatedemosvc` |
+| `TFSTATE_CONTAINER` | `tfstate` |
+| `SONAR_PROJECT_KEY` / `SONAR_HOST_URL` | (opcional) |
+
+### 2.5 Configurar OIDC (login sin contraseñas/secret de larga duración)
+No usamos un `AZURE_CREDENTIALS` con secreto de client; usamos **Federated Identity Credentials**
+para que GitHub Actions se autentique en Azure con OIDC:
+
+1. Crea (o reusa) una App Registration en Azure AD:
+   ```bash
+   az ad app create --display-name "gh-demo-service"
+   ```
+2. Crea un Service Principal asociado y asígnale rol `Contributor` sobre la subscripción o
+   sobre el resource group de destino:
+   ```bash
+   az ad sp create --id <APP_ID>
+   az role assignment create --assignee <APP_ID> --role Contributor \
+     --scope /subscriptions/<SUBSCRIPTION_ID>
+   ```
+3. Agrega la credencial federada apuntando a tu repo/rama:
+   ```bash
+   az ad app federated-credential create --id <APP_ID> --parameters '{
+     "name": "gh-demo-service-main",
+     "issuer": "https://token.actions.githubusercontent.com",
+     "subject": "repo:<tu-org>/demo-service:ref:refs/heads/main",
+     "audiences": ["api://AzureADTokenExchange"]
+   }'
+   ```
+   (repite el `federated-credential create` para `environment:dev`, `environment:prod`, etc. si
+   quieres restringir por ambiente en vez de por rama).
+4. Guarda `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` como secrets (paso 2.4).
+
+Con esto, los pasos `azure/login@v2` en `build.yml` y `deploy.yml` ya funcionan sin contraseñas.
+
+---
+
+## 3. Pipeline de Build (`.github/workflows/build.yml`)
+
+Se dispara en push/PR a `main`/`develop`/`feature/**`. Hace:
+1. `mvn clean compile` + `mvn test` (JDK 17) y publica el reporte JUnit.
+2. (Opcional) análisis SonarQube/SonarCloud.
+3. `mvn package` → sube el `.jar` como artifact.
+4. Login a Azure vía OIDC → `az acr login` → **build & push de la imagen Docker al ACR**
+   (tags `<sha-corto>` y `latest`).
+5. Escaneo de vulnerabilidades de la imagen con Trivy.
+
+## 4. Pipeline de Deploy (`.github/workflows/deploy.yml`)
+
+Se dispara automáticamente cuando el Build termina bien en `main`, o manualmente
+(`workflow_dispatch`) eligiendo ambiente (`dev`/`qa`/`prod`) y opcionalmente el tag de imagen.
+
+1. **Job `terraform-aks`**: `terraform init` (backend remoto en Azure Storage) →
+   `validate` → `plan -var-file=envs/<env>.tfvars` → `apply`. Esto crea/actualiza
+   Resource Group, VNet/Subnet, **ACR** y **AKS** (módulos en `infra/terraform/modules/`).
+2. **Job `deploy-app`**: obtiene credenciales del AKS recién creado/actualizado,
+   hace `helm upgrade --install` con el chart de `helm/demo-service`, verifica el
+   `rollout status` y corre un smoke test contra `/actuator/health`.
+
+---
+
+## 5. Contenerización (Dockerfile)
+
+Build multi-stage:
+- **Etapa build**: imagen `maven:3.9.9-eclipse-temurin-17`, compila y empaqueta el jar.
+- **Etapa runtime**: imagen `eclipse-temurin:17-jre-jammy` (liviana, sin JDK completo),
+  corre como usuario no-root, expone `8080`, con `HEALTHCHECK` contra `/actuator/health`.
+
+Probar localmente:
+```bash
+docker build -t demo-service:local .
+docker run -p 8080:8080 demo-service:local
+curl http://localhost:8080/api/v1/greeting?name=Juan
+curl http://localhost:8080/actuator/health
+```
+
+---
+
+## 6. Terraform — módulos
+
+- **`modules/networking`**: VNet + Subnet dedicada para el node pool de AKS.
+- **`modules/acr`**: Azure Container Registry (SKU Standard, admin deshabilitado —
+  se usa OIDC/roles, no usuario/clave).
+- **`modules/aks`**: Cluster AKS con identidad `SystemAssigned`, autoscaling del node pool,
+  `oidc_issuer_enabled` + `workload_identity_enabled` (para futuras integraciones con
+  Workload Identity), y un `azurerm_role_assignment` que da `AcrPull` al kubelet identity
+  del cluster sobre el ACR — así los nodos pueden bajar imágenes sin secretos de Docker.
+
+El root (`infra/terraform/main.tf`) orquesta los tres módulos y expone outputs
+(`acr_login_server`, `aks_cluster_name`, etc.) que el pipeline de deploy usa para conectar
+Helm/kubectl al cluster correcto.
+
+Backend remoto: crea una vez (fuera de este repo, manualmente o con un bootstrap aparte)
+un Storage Account + contenedor Blob para el `tfstate`:
+```bash
+az group create -n rg-tfstate -l eastus2
+az storage account create -n sttfstatedemosvc -g rg-tfstate -l eastus2 --sku Standard_LRS
+az storage container create -n tfstate --account-name sttfstatedemosvc
+```
+Esos nombres van en las variables `TFSTATE_RG`, `TFSTATE_SA`, `TFSTATE_CONTAINER` (paso 2.4).
+
+Probar localmente antes de confiar en el pipeline:
+```bash
+cd infra/terraform
+terraform init -backend-config="resource_group_name=rg-tfstate" \
+  -backend-config="storage_account_name=sttfstatedemosvc" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=dev.aks.tfstate"
+terraform plan -var-file=envs/dev.tfvars
+terraform apply -var-file=envs/dev.tfvars
+```
+
+---
+
+## 7. Helm — despliegue en AKS
+
+Chart en `helm/demo-service/`, parametrizado por `values-<env>.yaml`:
+- `deployment.yaml`: probes de liveness/readiness contra Spring Boot Actuator,
+  límites de CPU/memoria, variable `SPRING_PROFILES_ACTIVE`.
+- `service.yaml`: `ClusterIP` interno.
+- `ingress.yaml`: deshabilitado en dev, habilitado en prod (con TLS).
+- `hpa.yaml`: autoscaling horizontal por CPU.
+
+Probar localmente contra el cluster (una vez que Terraform lo creó):
+```bash
+az aks get-credentials -g rg-demo-service-dev -n aks-demo-service-dev
+helm upgrade --install demo-service ./helm/demo-service \
+  --namespace demo --create-namespace \
+  --set image.repository=acrdemoservicedev.azurecr.io/demo-service \
+  --set image.tag=latest \
+  --values ./helm/demo-service/values-dev.yaml
+kubectl get pods -n demo
+kubectl port-forward svc/demo-service 8080:80 -n demo
+curl http://localhost:8080/actuator/health
+```
+
+---
+
+## 8. Flujo completo end-to-end
+
+1. Desarrollador hace push a `feature/x` → PR a `main` → **build.yml** compila, testea,
+   analiza y (en push a main) construye y publica la imagen en ACR.
+2. Al mergear a `main`, termina `build.yml` → dispara **deploy.yml** automáticamente
+   (o se lanza manualmente eligiendo ambiente).
+3. `deploy.yml` aplica Terraform (crea/actualiza RG + VNet + ACR + AKS si hace falta) y
+   luego hace `helm upgrade --install` con la imagen recién publicada.
+4. Verificación automática de rollout + smoke test contra `/actuator/health`.
+5. Para promover a `qa`/`prod`, se dispara `deploy.yml` manualmente eligiendo el ambiente
+   (los `Environments` de GitHub pueden exigir aprobación manual antes de aplicar en prod).
+
+EOF
+echo OK
+Salida
+OK
